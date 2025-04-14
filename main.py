@@ -1,23 +1,18 @@
 import os
+import json
 from pathlib import Path
 from collections import defaultdict
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredWordDocumentLoader
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from dotenv import load_dotenv
 load_dotenv()
-
-SUPPORTED_TYPES = {
-    ".pdf": "pdf",
-    ".txt": "txt",
-    ".docx": "docx"
-}
 
 DATA_DIR = "data"
 INDEX_BASE_DIR = "indexes"
 
 def get_gemini_embeddings():
-    return GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    return GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
 
 def get_gemini_llm():
     return ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2)
@@ -36,18 +31,43 @@ def load_docs(file_type, file_paths):
 def build_or_load_faiss(file_type, file_paths):
     embeddings = get_gemini_embeddings()
     index_dir = os.path.join(INDEX_BASE_DIR, f"{file_type}_index")
+    meta_path = os.path.join(INDEX_BASE_DIR, f"{file_type}_indexed.json")
 
-    if os.path.exists(index_dir):
-        print(f"Loading existing FAISS index for {file_type}")
-        return FAISS.load_local(index_dir, embeddings, allow_dangerous_deserialization=True)
+    # Load list of already indexed files
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r") as f:
+                indexed_files = set(json.load(f))
+        except json.JSONDecodeError:
+            indexed_files = set()
     else:
-        print(f"Creating FAISS index for {file_type}")
-        docs = load_docs(file_type, file_paths)
-        faiss_index = FAISS.from_documents(docs, embeddings)
-        faiss_index.save_local(index_dir)
-        return faiss_index
+        indexed_files = set()
 
-def retrieve_all_sources(query, stores, k=4):
+    # Identify new files
+    current_files = set(str(Path(path).resolve()) for path in file_paths)
+    new_files = current_files - indexed_files
+
+    faiss_index = None
+    if new_files:
+        print(f"Found {len(new_files)} new file(s) for '{file_type}'. Indexing....")
+        docs = load_docs(file_type, list(new_files))
+        if docs:
+            if faiss_index:
+                faiss_index.add_documents(docs)
+            else:
+                faiss_index = FAISS.from_documents(docs, embeddings)
+            
+            faiss_index.save_local(index_dir)
+
+            with open(meta_path, "w") as f:
+                json.dump(sorted(current_files), f, indent=2)
+    else:
+        print(f"FAISS index exists for '{file_type}'.")
+        faiss_index =FAISS.load_local(index_dir, embeddings, allow_dangerous_deserialization=True)
+
+    return faiss_index
+
+def retrieve_all_sources(query, stores, k=2):
     all_docs = []
     for store in stores.values():
         all_docs.extend(store.similarity_search(query, k=k))
@@ -56,10 +76,8 @@ def retrieve_all_sources(query, stores, k=4):
 def scan_data_directory():
     file_map = defaultdict(list)
     for path in Path(DATA_DIR).glob("*"):
-        ext = path.suffix.lower()
-        if ext in SUPPORTED_TYPES:
-            file_type = SUPPORTED_TYPES[ext]
-            file_map[file_type].append(path)
+        ext = path.suffix.lower()[1:]
+        file_map[ext].append(path)
     return file_map
 
 def main():
