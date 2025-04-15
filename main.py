@@ -5,17 +5,17 @@ from collections import defaultdict
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredWordDocumentLoader
 from langchain_community.vectorstores import FAISS
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from dotenv import load_dotenv
-load_dotenv()
+from dotenv import load_dotenv,find_dotenv
+load_dotenv(find_dotenv())
 
 DATA_DIR = "data"
 INDEX_BASE_DIR = "indexes"
 
 def get_gemini_embeddings():
-    return GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
+    return GoogleGenerativeAIEmbeddings(model="models/text-embedding-004",verbose=True)
 
 def get_gemini_llm():
-    return ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2)
+    return ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.2,verbose=True)
 
 def load_docs(file_type, file_paths):
     docs = []
